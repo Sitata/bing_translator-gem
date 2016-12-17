@@ -16,18 +16,23 @@ class BingTranslator
   NAMESPACE_URI = 'http://api.microsofttranslator.com/V2'
   ACCESS_TOKEN_URI = 'https://datamarket.accesscontrol.windows.net/v2/OAuth2-13'
   DATASETS_URI = "https://api.datamarket.azure.com/Services/My/Datasets?$format=json"
+  COGNITIVE_ACCESS_TOKEN_URI = "https://api.cognitive.microsoft.com/sts/v1.0/issueToken"
 
   class Exception < StandardError; end
   class AuthenticationException < StandardError; end
 
-  def initialize(client_id, client_secret, skip_ssl_verify = false, account_key = nil)
-    @client_id = client_id
-    @client_secret = client_secret
-    @account_key = account_key
-    @skip_ssl_verify = skip_ssl_verify
+  def initialize(options)
+    options ||= Hash.new
+
+    @client_id = options[:client_id]
+    @client_secret = options[:client_secret]
+    @account_key = options[:account_key]
+    @skip_ssl_verify = options[:skip_ssl_verify] || false
+    @subscription_key = options[:subscription_key]
 
     @access_token_uri = URI.parse ACCESS_TOKEN_URI
     @datasets_uri = URI.parse DATASETS_URI
+    @cognitive_token_uri = URI.parse COGNITIVE_ACCESS_TOKEN_URI
   end
 
   def translate(text, params = {})
@@ -143,6 +148,31 @@ class BingTranslator
   # Returns existing @access_token if we don't need a new token yet,
   # or returns the one just obtained.
   def get_access_token
+    if @subscription_key
+      get_cognitive_access_token
+    else
+      get_datamarket_access_token
+    end
+  end
+
+  def get_cognitive_access_token
+    headers = {
+      'Ocp-Apim-Subscription-Key' => @subscription_key
+    }
+
+    http = Net::HTTP.new(@cognitive_token_uri.host, @cognitive_token_uri.port)
+    http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE if @skip_ssl_verify
+
+    response = http.post(@cognitive_token_uri.path, "", headers)
+
+    @access_token = {
+      'access_token' => response.body,
+      'expires_at' => Time.now + 480
+    }
+  end
+
+  def get_datamarket_access_token
     return @access_token if @access_token and @access_token['expires_at'] and
       Time.now < @access_token['expires_at']
 
